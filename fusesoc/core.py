@@ -33,7 +33,10 @@ class Core:
 
         for s in section.SECTION_MAP:
             assert(not hasattr(self, s))
-            setattr(self, s, None)
+            if(section.SECTION_MAP[s].named):
+                setattr(self, s, {})
+            else:
+                setattr(self, s, None)
 
         self.core_root = os.path.dirname(core_file)
         self.files_root = self.core_root
@@ -47,7 +50,12 @@ class Core:
             self.simulator        = config.get_section('simulator')
 
             for s in section.load_all(config, name=self.name):
-                setattr(self, s.TAG, s)
+                if type(s) == tuple:
+                    _l = getattr(self, s[0].TAG)
+                    _l[s[1]] = s[0]
+                    setattr(self, s[0].TAG, _l)
+                else:
+                    setattr(self, s.TAG, s)
             self.depend     = self.main.depend
             self.simulators = self.main.simulators
 
@@ -99,7 +107,8 @@ class Core:
         for s in section.SECTION_MAP:
             obj = getattr(self, s)
             if obj:
-                src_files += obj.export()
+                if not (type(obj) == dict):
+                    src_files += obj.export()
 
         dirs = list(set(map(os.path.dirname,src_files)))
         for d in dirs:
@@ -160,4 +169,9 @@ class Core:
             obj = getattr(self, s)
             if obj:
                 print("== " + s + " ==")
-                print(obj)
+                if(type(obj) == dict):
+                    for k, v in obj.items():
+                        print(str(k))
+                        print(str(v))
+                else:
+                    print(obj)

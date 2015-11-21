@@ -43,9 +43,8 @@ class EnumList(list):
         
 class SimulatorList(EnumList):
     def __new__(cls, *args, **kwargs):
-        values = ['icarus', 'modelsim', 'verilator', 'isim']
+        values = ['icarus', 'modelsim', 'verilator', 'isim', 'xsim']
         return super(SimulatorList, cls).__new__(cls, *args, values=values)
-
 class SourceType(str):
     def __new__(cls, *args, **kwargs):
         if args:
@@ -59,7 +58,7 @@ class SourceType(str):
 class Section(object):
 
     TAG = None
-
+    named = False
     def __init__(self):
         self._members = {}
         self.export_files = []
@@ -115,7 +114,7 @@ class MainSection(Section):
 
         self._add_member('description', str, "Core description")
         self._add_member('depend'     , StringList, "Common dependencies")
-        self._add_member('simulators' , SimulatorList, "Supported simulators. Valid values are icarus, modelsim, verilator and isim. Each simulator have a dedicated section desribed elsewhere in this document")
+        self._add_member('simulators' , SimulatorList, "Supported simulators. Valid values are icarus, modelsim, verilator, isim and xsim. Each simulator have a dedicated section desribed elsewhere in this document")
         self._add_member('patches'    , StringList, "FuseSoC-specific patches")
 
         if items:
@@ -242,6 +241,25 @@ class IsimSection(ToolSection):
         return s
 
 
+class XsimSection(ToolSection):
+
+    TAG = 'xsim'
+
+    def __init__(self, items=None):
+        super(XsimSection, self).__init__()
+
+        self._add_member('xsim_options', StringList, "Extra Xsim compile options")
+
+        if items:
+            self.load_dict(items)
+
+    def __str__(self):
+        s = ""
+        if self.depend: s += "Xsim-specific dependencies : {}\n".format(' '.join(self.depend))
+        if self.xsim_options: s += "Xsim compile options : {}\n".format(' '.join(self.xsim_options))
+        return s
+
+
 class VerilatorSection(ToolSection):
 
     TAG = 'verilator'
@@ -260,7 +278,7 @@ class VerilatorSection(ToolSection):
         self._add_member('libs'             , PathList  , "External libraries linked with the generated model")
 
         self._add_member('tb_toplevel', str, 'Testbench top-level C/C++/SC file')
-        self._add_member('source_type', SourceType, 'Testbench source code language (Legal values are systemC, C, CPP. Default is C)')
+        self._add_member('source_type', str, 'Testbench source code language (Legal values are systemC, C, CPP. Default is C)')
         self._add_member('top_module' , str, 'verilog top-level module')
 
         if items:
@@ -291,96 +309,6 @@ Verilog top module      : {top_module}
                         source_type=self.source_type,
                         top_module=self.top_module)
 
-    def build(self, core, sim_root, src_root):
-        if self.source_type == 'C' or self.source_type == '':
-            self.build_C(core, sim_root, src_root)
-        elif self.source_type == 'CPP':
-            self.build_CPP(core, sim_root, src_root)
-        elif self.source_type == 'systemC':
-            self.build_SysC(core, sim_root, src_root)
-        else:
-            raise Source(self.source_type)
-
-        if self._object_files:
-            args = []
-            args += ['rvs']
-            args += [core+'.a']
-            args += self._object_files
-            l = Launcher('ar', args,
-                     cwd=sim_root)
-            if Config().verbose:
-                pr_info("  linker working dir: " + sim_root)
-                pr_info("  linker command: ar " + ' '.join(args))
-            l.run()
-            print()
-
-    def build_C(self, core, sim_root, src_root):
-        args = ['-c']
-        args += ['-std=c99']
-        args += ['-I'+src_root]
-        args += ['-I'+os.path.join(src_root, core, s) for s in self.include_dirs]
-        for src_file in self.src_files:
-            pr_info("Compiling " + src_file)
-            l = Launcher('gcc',
-                     args + [os.path.join(src_root, core, src_file)],
-                         cwd=sim_root,
-                         stderr = open(os.path.join(sim_root, 'gcc.err.log'),'a'),
-                         stdout = open(os.path.join(sim_root, 'gcc.out.log'),'a'))
-            if Config().verbose:
-                pr_info("  C compilation working dir: " + sim_root)
-                pr_info("  C compilation command: gcc " + ' '.join(args) + ' ' + os.path.join(src_root, core, src_file))
-            l.run()
-
-    def build_CPP(self, core, sim_root, src_root):
-        verilator_root = utils.get_verilator_root()
-        if verilator_root is None:
-            verilator_root = utils.get_verilator_root()
-        args = ['-c']
-        args += ['-I'+src_root]
-        args += ['-I'+os.path.join(src_root, core, s) for s in self.include_dirs]
-        args += ['-I'+os.path.join(verilator_root,'include')]
-        args += ['-I'+os.path.join(verilator_root,'include', 'vltstd')]
-        for src_file in self.src_files:
-            pr_info("Compiling " + src_file)
-            l = Launcher('g++', args + [os.path.join(src_root, core, src_file)],
-                         cwd=sim_root,
-                         stderr = open(os.path.join(sim_root, 'g++.err.log'),'a'))
-            if Config().verbose:
-                pr_info("  C++ compilation working dir: " + sim_root)
-                pr_info("  C++ compilation command: g++ " + ' '.join(args) + ' ' + os.path.join(src_root, core, src_file))
-            l.run()
-
-    def build_SysC(self, core, sim_root, src_root):
-        verilator_root = utils.get_verilator_root()
-        args = ['-I.']
-        args += ['-MMD']
-        args += ['-I'+src_root]
-        args += ['-I'+s for s in self.include_dirs]
-        args += ['-Iobj_dir']
-        args += ['-I'+os.path.join(verilator_root,'include')]
-        args += ['-I'+os.path.join(verilator_root,'include', 'vltstd')]  
-        args += ['-DVL_PRINTF=printf']
-        args += ['-DVM_TRACE=1']
-        args += ['-DVM_COVERAGE=0']
-        if os.getenv('SYSTEMC_INCLUDE'):
-            args += ['-I'+os.getenv('SYSTEMC_INCLUDE')]
-        if os.getenv('SYSTEMC'):
-            args += ['-I'+os.path.join(os.getenv('SYSTEMC'),'include')]
-        args += ['-Wno-deprecated']
-        if os.getenv('SYSTEMC_CXX_FLAGS'):
-             args += [os.getenv('SYSTEMC_CXX_FLAGS')]
-        args += ['-c']
-        args += ['-g']
-
-        for src_file in self.src_files:
-            pr_info("Compiling " + src_file)
-            l = Launcher('g++', args + [os.path.join(src_root, core, src_file)],
-                         cwd=sim_root,
-                         stderr = open(os.path.join(sim_root, 'g++.err.log'),'a'))
-            if Config().verbose:
-                pr_info("  SystemC compilation working dir: " + sim_root)
-                pr_info("  SystemC compilation command: g++ " + ' '.join(args) + ' ' + os.path.join(src_root, core, src_file))
-            l.run()
 
 class IseSection(ToolSection):
 
@@ -421,10 +349,32 @@ class QuartusSection(ToolSection):
             self.load_dict(items)
             self.export_files = self.qsys_files + self.sdc_files
 
+class ParameterSection(Section):
+    TAG = 'parameter'
+    named = True
+    def __init__(self, items=None):
+        super(ParameterSection, self).__init__()
+
+        self._add_member('datatype'   , str, 'Data type of argument (int, str, bool, file')
+        self._add_member('description', str, 'Parameter description')
+        self._add_member('paramtype'  , str, 'Type of parameter (plusarg, vlogparam, generic, cmdlinearg')
+        self._add_member('scope'      , str, 'Visibility of parameter. Private parameters are only visible when this core is the top-level. Public parameters are visible also when this core is pulled in as a dependency of another core')
+
+        if items:
+            self.load_dict(items)
 
 def load_section(config, section_name, name='<unknown>'):
-    cls = SECTION_MAP.get(section_name)
+    tmp = section_name.split(' ')
+    _type = tmp[0]
+    if len(tmp) == 2:
+        _name = tmp[1]
+    else:
+        _name = None
+    cls = SECTION_MAP.get(_type)
     if cls is None:
+        #Note: The following sections are not in section.py yet
+        if not section_name in ['plusargs', 'simulator', 'provider']:
+            pr_warn("Unknown section '{}' in '{}'".format(section_name, name))
         return None
 
     items = config.get_section(section_name)
@@ -432,7 +382,10 @@ def load_section(config, section_name, name='<unknown>'):
     if section.warnings:
         for warning in section.warnings:
             pr_warn('Warning: %s in %s' % (warning, name))
-    return section
+    if _name:
+        return (section, _name)
+    else:
+        return section
 
 
 def load_all(config, name='<unknown>'):

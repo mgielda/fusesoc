@@ -26,6 +26,7 @@ simulator_PYTHON =      \
  fusesoc/simulator/__init__.py  \
  fusesoc/simulator/icarus.py    \
  fusesoc/simulator/isim.py      \
+ fusesoc/simulator/xsim.py      \
  fusesoc/simulator/modelsim.py  \
  fusesoc/simulator/simulator.py \
  fusesoc/simulator/verilator.py
@@ -41,6 +42,11 @@ build_PYTHON =      \
 
 builddir = $(fusesocdir)/build
 
-EXTRA_DIST = INSTALL
+EXTRA_DIST = INSTALL doc
 
 SUBDIRS = bin
+
+dist-hook:
+	make -C $(distdir)/doc clean all
+	rm `find $(distdir)/doc -name '*.txt'`
+	rm $(distdir)/doc/Makefile
